@@ -2,9 +2,10 @@ const Complaint = require('../models/complaint');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI('AIzaSyB7kjPOLBCWChhdbP3vSXGDC7HAWzpv3Rg');
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 exports.submitComplaint = async (req, res) => {
   try {
