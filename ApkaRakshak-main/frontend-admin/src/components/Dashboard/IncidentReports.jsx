@@ -195,8 +195,13 @@ const IncidentCard = ({ crime }) => {
 
   const handleClick = async () => {
     const res = await fetchResponse(crime.image);
-    setCriminalStatus(res.message);
-    setIsCriminal(res.result === "Red");
+    if (res) {
+      setCriminalStatus(res.message);
+      setIsCriminal(res.result === "Red");
+    } else {
+      setCriminalStatus("Error checking criminal status");
+      setIsCriminal(false);
+    }
   };
 
   const handleCheckboxChange = () => {
@@ -216,31 +221,124 @@ const IncidentCard = ({ crime }) => {
     }
   };
 
-  const generatePDF = () => {
+  const generatePDF = async () => {
     const doc = new jsPDF();
     doc.setFontSize(26);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(0, 51, 102);
     doc.text("Incident Report", 105, 15, { align: "center" });
 
-    const img = new Image();
-    const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
-    img.crossOrigin = 'Anonymous';
-    img.src = proxyUrl + crime.image;
-    img.onload = () => {
-      let imgWidth = 70;
-      let imgHeight = (img.height * imgWidth) / img.width;
-      if (imgHeight > 60) {
-        imgHeight = 60;
-        imgWidth = (img.width * imgHeight) / img.height;
+    // Try to load and include the actual image
+    try {
+      console.log('Loading image for PDF:', crime.image);
+      
+      // Create a new image element
+      const img = new Image();
+      
+      // Try different approaches to load the image
+      let imageData = null;
+      
+      try {
+        // First, try to fetch the image as a blob and convert to data URL
+        const response = await fetch(crime.image, { mode: 'cors' });
+        if (response.ok) {
+          const blob = await response.blob();
+          const reader = new FileReader();
+          
+          await new Promise((resolve, reject) => {
+            reader.onload = () => {
+              imageData = reader.result;
+              resolve();
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      } catch (fetchError) {
+        console.log('Direct fetch failed, trying proxy:', fetchError.message);
+        
+        // Try with CORS proxy
+        try {
+          const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(crime.image);
+          const proxyResponse = await fetch(proxyUrl);
+          
+          if (proxyResponse.ok) {
+            const blob = await proxyResponse.blob();
+            const reader = new FileReader();
+            
+            await new Promise((resolve, reject) => {
+              reader.onload = () => {
+                imageData = reader.result;
+                resolve();
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+          }
+        } catch (proxyError) {
+          console.log('Proxy fetch also failed:', proxyError.message);
+        }
       }
-      doc.addImage(img, 'JPEG', 140, 25, imgWidth, imgHeight);
-      addTextContent(doc);
-    };
-
-    img.onerror = () => {
-      addTextContent(doc);
-    };
+      
+      // If we have image data, add it to the PDF
+      if (imageData) {
+        console.log('Image loaded successfully, adding to PDF');
+        
+        // Load the image to get dimensions
+        img.src = imageData;
+        await new Promise((resolve) => {
+          if (img.complete) {
+            resolve();
+          } else {
+            img.onload = resolve;
+            img.onerror = resolve;
+          }
+        });
+        
+        if (img.naturalWidth > 0) {
+          // Calculate dimensions to fit in the PDF
+          let imgWidth = 70;
+          let imgHeight = (img.height * imgWidth) / img.width;
+          
+          // Ensure it fits within the available space
+          if (imgHeight > 60) {
+            imgHeight = 60;
+            imgWidth = (img.width * imgHeight) / img.height;
+          }
+          
+          // Add the image to the PDF
+          doc.addImage(imageData, 'JPEG', 140, 25, imgWidth, imgHeight);
+          console.log('Image added to PDF successfully');
+        } else {
+          throw new Error('Image dimensions invalid');
+        }
+      } else {
+        throw new Error('Could not load image data');
+      }
+      
+    } catch (error) {
+      console.log('Failed to load image:', error.message);
+      
+      // Fallback: Add image placeholder
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text("Image Reference:", 20, 25);
+      doc.text(crime.image, 20, 32, { maxWidth: 100 });
+      
+      // Add a border box where the image would be
+      doc.setDrawColor(200, 200, 200);
+      doc.rect(140, 25, 70, 60);
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text("Image unavailable", 145, 55);
+      doc.text("(CORS restricted)", 145, 62);
+    }
+    
+    addTextContent(doc);
+    
+    // Save the PDF
+    doc.save(`incident-report-${crime.id}.pdf`);
+    console.log('PDF generated successfully');
   };
 
   const addTextContent = (doc) => {
@@ -329,7 +427,7 @@ const IncidentCard = ({ crime }) => {
           </div>
           <button 
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition duration-200 flex items-center"
-            onClick={generatePDF}
+            onClick={() => generatePDF().catch(console.error)}
           >
             <Download size={16} className="mr-2" />
             Full Report Download

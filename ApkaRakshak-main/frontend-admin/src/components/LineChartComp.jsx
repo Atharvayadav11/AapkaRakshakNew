@@ -52,7 +52,7 @@ export function LineChartComp() {
     // Function to fetch data
     const fetchData = async () => {
       try {
-        const response = await axios.get('http://localhost:4000/api/firs/lastTwoYears');
+        const response = await axios.get('http://localhost:5000/api/firs/lastTwoYears');
         setData(response.data); // Set the data in state
       } catch (err) {
         console.log(err)

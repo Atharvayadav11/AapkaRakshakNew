@@ -19,7 +19,7 @@ const FIRSTable = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`http://localhost:4000/api/firs/district/${district}?page=${page}&limit=10`);
+      const res = await axios.get(`http://localhost:5000/api/firs/district/${district}?page=${page}&limit=10`);
       setData(res.data.data);
       setTotalPages(res.data.totalPages);
     } catch (error) {

@@ -10,6 +10,10 @@ import {
   Send,
   ChevronDown,
   ChevronUp,
+  Shield,
+  ShieldCheck,
+  Loader,
+  XCircle,
 } from 'lucide-react';
 import axios from 'axios';
 
@@ -26,12 +30,18 @@ const ComplaintCard = ({ complaint }) => {
     isVerified = false,
     userDetailss,
     anonymous = false,
+    imageUrl, // Assuming the complaint has an imageUrl field
   } = complaint || {};
 
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [verifiedStatus, setVerifiedStatus] = useState(isVerified);
+  
+  // Criminal check states
+  const [criminalCheckStatus, setCriminalCheckStatus] = useState(null); // null, 'checking', 'Red', 'Blue', 'error'
+  const [criminalCheckResult, setCriminalCheckResult] = useState(null);
+  const [criminalCheckLoading, setCriminalCheckLoading] = useState(false);
 
   // Fetch existing comments from localStorage
   useEffect(() => {
@@ -39,11 +49,28 @@ const ComplaintCard = ({ complaint }) => {
     if (storedComments) {
       setComments(JSON.parse(storedComments));
     }
+
+    // Check if criminal check was previously performed
+    const storedCriminalCheck = localStorage.getItem(`criminal_check_${_id}`);
+    if (storedCriminalCheck) {
+      const checkData = JSON.parse(storedCriminalCheck);
+      setCriminalCheckStatus(checkData.status);
+      setCriminalCheckResult(checkData.result);
+    }
   }, [_id]);
 
   // Save comments to localStorage
   const saveComments = (updatedComments) => {
     localStorage.setItem(`comments_${_id}`, JSON.stringify(updatedComments));
+  };
+
+  // Save criminal check result to localStorage
+  const saveCriminalCheck = (status, result) => {
+    localStorage.setItem(`criminal_check_${_id}`, JSON.stringify({
+      status,
+      result,
+      timestamp: new Date().toISOString()
+    }));
   };
 
   // Add a new comment
@@ -80,12 +107,122 @@ const ComplaintCard = ({ complaint }) => {
         `http://localhost:3001/api/toggleVerification/${_id}`
       );
       if (response.status === 200) {
-        setVerifiedStatus((prevStatus) => !prevStatus); // Update the state based on response
+        setVerifiedStatus((prevStatus) => !prevStatus);
       }
     } catch (error) {
       console.error('Error toggling verification:', error);
     }
   };
+
+  // Handle criminal check
+  const handleCriminalCheck = async (checked) => {
+    if (!checked) {
+      // If unchecked, reset the criminal check status
+      setCriminalCheckStatus(null);
+      setCriminalCheckResult(null);
+      localStorage.removeItem(`criminal_check_${_id}`);
+      return;
+    }
+
+    if (!imageUrl) {
+      alert('No image available for this complaint');
+      return;
+    }
+
+    setCriminalCheckLoading(true);
+    setCriminalCheckStatus('checking');
+
+    try {
+      console.log('Sending criminal check request for image:', imageUrl);
+      
+      const response = await axios.post('http://localhost:5000/compare-faces', {
+        image1: imageUrl
+      }, {
+        timeout: 30000, // 30 second timeout
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('Criminal check response:', response.data);
+
+      const { result, message, matchedName, confidence } = response.data;
+      
+      setCriminalCheckStatus(result); // 'Red' or 'Blue'
+      setCriminalCheckResult({
+        message,
+        matchedName,
+        confidence,
+        timestamp: new Date().toISOString()
+      });
+      
+      saveCriminalCheck(result, {
+        message,
+        matchedName,
+        confidence,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error('Error in criminal check:', error);
+      setCriminalCheckStatus('error');
+      setCriminalCheckResult({
+        message: error.response?.data?.error || error.message || 'Failed to check criminal database',
+        timestamp: new Date().toISOString()
+      });
+      
+      saveCriminalCheck('error', {
+        message: error.response?.data?.error || error.message || 'Failed to check criminal database',
+        timestamp: new Date().toISOString()
+      });
+    } finally {
+      setCriminalCheckLoading(false);
+    }
+  };
+
+  // Get criminal check display info
+  const getCriminalCheckDisplay = () => {
+    if (criminalCheckLoading) {
+      return {
+        icon: <Loader size={20} className="mr-1 animate-spin" />,
+        text: 'Checking...',
+        color: 'text-blue-500'
+      };
+    }
+
+    switch (criminalCheckStatus) {
+      case 'Red':
+        // Check if confidence is less than 80% for partial match
+        const confidence = criminalCheckResult?.confidence;
+        const isPartialMatch = confidence && confidence < 80;
+        
+        return {
+          icon: <XCircle size={20} className="mr-1" />,
+          text: isPartialMatch ? 'Partial Match Found' : 'Criminal Match Found',
+          color: isPartialMatch ? 'text-orange-500' : 'text-red-500'
+        };
+      case 'Blue':
+        return {
+          icon: <ShieldCheck size={20} className="mr-1" />,
+          text: 'No Criminal Match',
+          color: 'text-green-500'
+        };
+      case 'error':
+        return {
+          icon: <AlertTriangle size={20} className="mr-1" />,
+          text: 'Check Failed',
+          color: 'text-orange-500'
+        };
+      default:
+        return {
+          icon: <Shield size={20} className="mr-1" />,
+          text: 'Check Criminal Database',
+          color: 'text-gray-500'
+        };
+    }
+  };
+
+  const criminalDisplay = getCriminalCheckDisplay();
 
   return (
     <div className="bg-white rounded-lg shadow-lg overflow-hidden">
@@ -143,6 +280,34 @@ const ComplaintCard = ({ complaint }) => {
           </div>
         )}
 
+        {/* Criminal Check Result Display */}
+        {criminalCheckResult && (
+          <div className={`p-4 rounded-lg mb-4 ${
+            criminalCheckStatus === 'Red' ? 
+              (criminalCheckResult.confidence && criminalCheckResult.confidence < 80 ? 'bg-orange-50 border border-orange-200' : 'bg-red-50 border border-red-200') :
+            criminalCheckStatus === 'Blue' ? 'bg-green-50 border border-green-200' :
+            'bg-orange-50 border border-orange-200'
+          }`}>
+            <h3 className="font-semibold text-gray-700 mb-2">Criminal Database Check:</h3>
+            <p className={`text-sm ${criminalDisplay.color}`}>
+              <strong>Result:</strong> {criminalCheckResult.message}
+            </p>
+            {criminalCheckResult.matchedName && (
+              <p className="text-sm text-red-600 mt-1">
+                <strong>Matched Person:</strong> {criminalCheckResult.matchedName}
+              </p>
+            )}
+            {criminalCheckResult.confidence && (
+              <p className="text-sm text-red-600 mt-1">
+                <strong>Confidence:</strong> {criminalCheckResult.confidence}%
+              </p>
+            )}
+            <p className="text-xs text-gray-500 mt-2">
+              Checked on: {new Date(criminalCheckResult.timestamp).toLocaleString()}
+            </p>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-4">
             <button className="flex items-center text-gray-500 hover:text-blue-500">
@@ -155,27 +320,49 @@ const ComplaintCard = ({ complaint }) => {
             </button>
           </div>
 
-          {/* Checkbox for toggling verification */}
-          <div className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={verifiedStatus}
-              onChange={handleToggleVerification} // Toggle verification on checkbox change
-              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <label className="text-sm">
-              {verifiedStatus ? (
-                <span className="flex items-center text-green-500">
-                  <CheckCircle size={20} className="mr-1" />
-                  Verified
+          <div className="flex items-center space-x-6">
+            {/* Criminal Check Checkbox */}
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={criminalCheckStatus !== null}
+                onChange={(e) => handleCriminalCheck(e.target.checked)}
+                disabled={criminalCheckLoading || !imageUrl}
+                className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 disabled:opacity-50"
+              />
+              <label className={`text-sm ${criminalDisplay.color}`}>
+                <span className="flex items-center">
+                  {criminalDisplay.icon}
+                  {criminalDisplay.text}
                 </span>
-              ) : (
-                <span className="flex items-center text-yellow-500">
-                  <AlertTriangle size={20} className="mr-1" />
-                  Unverified
-                </span>
+              </label>
+              {!imageUrl && (
+                <span className="text-xs text-gray-400">(No image)</span>
               )}
-            </label>
+            </div>
+
+            {/* Verification Checkbox */}
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={verifiedStatus}
+                onChange={handleToggleVerification}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label className="text-sm">
+                {verifiedStatus ? (
+                  <span className="flex items-center text-green-500">
+                    <CheckCircle size={20} className="mr-1" />
+                    Verified
+                  </span>
+                ) : (
+                  <span className="flex items-center text-yellow-500">
+                    <AlertTriangle size={20} className="mr-1" />
+                    Unverified
+                  </span>
+                )}
+              </label>
+            </div>
           </div>
         </div>
 
